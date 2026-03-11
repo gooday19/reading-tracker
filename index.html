@@ -26,7 +26,7 @@ input,textarea,select{font-family:var(--sans);-webkit-appearance:none;border-rad
 .hdr-btns button{padding:5px 11px;border-radius:7px;border:1px solid var(--border);font-size:12px;color:var(--ink2);background:var(--card);}
 .quote{margin:12px 0;padding:9px 14px;background:rgba(139,94,60,.06);border-radius:9px;border-left:3px solid #c9a882;}
 .quote p{font-family:var(--serif);font-style:italic;font-size:12px;color:var(--ink2);line-height:1.6;}
-.sgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px;}
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;}
 .sc{background:var(--card);border-radius:9px;padding:8px 6px;border:1px solid var(--border);text-align:center;}
 .sl{font-size:9px;color:var(--muted);letter-spacing:.7px;text-transform:uppercase;font-family:var(--mono);margin-bottom:3px;}
 .sv{font-size:20px;font-weight:700;font-family:var(--serif);}
@@ -244,14 +244,13 @@ function render(){
   const gp=Math.min(100,Math.round((c26.length/D.yearGoal)*100));
   const tp=log.filter(l=>l.date===td()).reduce((s,l)=>s+Math.max(0,l.pages),0);
   const ld=[...new Set(log.map(l=>l.date))].sort().reverse();
-  let streak=0,ck=new Date(td());
-  for(const d of ld){if(d===ck.toISOString().split('T')[0]){streak++;ck.setDate(ck.getDate()-1);}else break;}
+
   const cc={};Object.keys(CATS).forEach(k=>{cc[k]=comp.filter(b=>b.category===k).length;});
 
   let h=`<div class="header"><div class="header-top"><div><h1>📖 Reading Tracker</h1><div class="sub">2022~ · Dr. Lee Keon-Joo · ${fd(td())}</div></div><div class="hdr-btns"><button onclick="openM('addBook')">+ 새 책</button><button onclick="showPrint()">📋 출력</button></div></div>`;
   h+=`<div class="quote"><p>${esc(quote)}</p></div>`;
   h+=`<div class="sgrid">`;
-  [{l:'읽는 중',v:cr.length,u:'권',c:'#3D7EC7'},{l:'2026 완독',v:c26.length,u:'/'+D.yearGoal,c:'#2E8B57'},{l:'전체 완독',v:tot,u:'권',c:'#C27028'},{l:'연속',v:streak,u:'일',c:streak>=7?'#B5485F':'#8B5E3C'}].forEach(s=>{h+=`<div class="sc"><div class="sl">${s.l}</div><div class="sv" style="color:${s.c}">${s.v}<span class="su">${s.u}</span></div></div>`;});
+  [{l:'읽는 중',v:cr.length,u:'권',c:'#3D7EC7'},{l:'2026 완독',v:c26.length,u:'/'+D.yearGoal,c:'#2E8B57'},{l:'전체 완독',v:tot,u:'권',c:'#C27028'}].forEach(s=>{h+=`<div class="sc"><div class="sl">${s.l}</div><div class="sv" style="color:${s.c}">${s.v}<span class="su">${s.u}</span></div></div>`;});
   h+=`</div><div class="goal-row"><div class="goal-bw"><div class="goal-lb"><span>2026 목표</span><span>${gp}%</span></div><div class="goal-tr"><div class="goal-fl" style="width:${gp}%"></div></div></div><div class="tbox"><div class="tl">오늘</div><div class="tv" style="color:${tp>=15?'#2E8B57':'var(--ink)'}">${tp}<span class="su">p</span></div></div></div>`;
   h+=`<div class="cbar">`;Object.entries(CATS).forEach(([k,v])=>{const w=((cc[k]||0)/Math.max(tot,1))*100;if(w>0)h+=`<div style="width:${w}%;background:${v.color}"></div>`;});
   h+=`</div></div>`;
