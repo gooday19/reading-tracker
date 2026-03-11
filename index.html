@@ -150,13 +150,14 @@ textarea.fi{min-height:100px;resize:vertical;line-height:1.7;}
 <div id="app"></div>
 <script>
 const SK='reading-tracker-v6';
-const CATS={
+const DEFAULT_CATS={
   stats:{label:'🧮 통계학 / 인과추론',emoji:'🧮',short:'통계·인과추론',color:'#3D7EC7'},
   genomics:{label:'🧬 유전체학 / 진화생물학',emoji:'🧬',short:'유전체·진화',color:'#2E8B57'},
   science:{label:'🔬 교양 과학 / 의학',emoji:'🔬',short:'교양과학·의학',color:'#C27028'},
   humanities:{label:'📚 인문 / 사회 / 철학',emoji:'📚',short:'인문·사회·철학',color:'#8B5E3C'},
   literature:{label:'📖 문학',emoji:'📖',short:'문학',color:'#B5485F'},
 };
+var CATS=JSON.parse(JSON.stringify(DEFAULT_CATS));
 const DD={
   currentlyReading:[
     {id:'cr1',title:'종의 기원',author:'찰스 다윈',totalPages:650,currentPage:525,startDate:'2026-01-15',language:'ko',category:'genomics'},
@@ -213,11 +214,197 @@ const DD={
 
 const QUOTES=["A reader lives a thousand lives before he dies. — G.R.R. Martin","책은 도끼다, 우리 안의 얼어붙은 바다를 위한. — 카프카","Reading is to the mind what exercise is to the body. — J. Addison","오늘 읽지 않으면 내일은 더 바빠진다.","I have always imagined Paradise as a kind of library. — Borges","한 권의 책을 천 번 읽으면 뜻이 저절로 통한다.","독서는 마음의 양식이다."];
 
+const DATA_VERSION=2;
+
 let D,tab='current',cf='all',yf='all',ms=null,_ml='ko',_mc='humanities',_er=0;
 const quote=QUOTES[Math.floor(Math.random()*QUOTES.length)];
 
-function load(){try{const s=localStorage.getItem(SK);D=s?JSON.parse(s):JSON.parse(JSON.stringify(DD));if(!D.ideas)D.ideas=[];}catch(e){D=JSON.parse(JSON.stringify(DD));}}
-function save(){try{localStorage.setItem(SK,JSON.stringify(D));}catch(e){}}
+function load(){
+  try{
+    var s=localStorage.getItem(SK);
+    if(s){
+      D=JSON.parse(s);
+      if(!D.ideas)D.ideas=[];
+      // Restore custom categories if saved
+      if(D.categories) CATS=D.categories;
+      else CATS=JSON.parse(JSON.stringify(DEFAULT_CATS));
+      // Version check: merge new default data if HTML was updated
+      if((D._v||0)<DATA_VERSION){
+        D=mergeData(D,JSON.parse(JSON.stringify(DD)));
+        D._v=DATA_VERSION;
+        save();
+      }
+    }else{
+      D=JSON.parse(JSON.stringify(DD));
+      D._v=DATA_VERSION;
+      CATS=JSON.parse(JSON.stringify(DEFAULT_CATS));
+      save();
+    }
+  }catch(e){
+    D=JSON.parse(JSON.stringify(DD));
+    D._v=DATA_VERSION;
+    CATS=JSON.parse(JSON.stringify(DEFAULT_CATS));
+  }
+}
+
+// Smart merge: keep user's runtime data (readingLog, notes, ideas, ratings, currentPage)
+// but update book metadata (author, title corrections) from new defaults
+function mergeData(local,fresh){
+  // Build lookup of fresh books by id
+  var freshById={};
+  fresh.completed.forEach(function(b){freshById[b.id]=b;});
+  fresh.currentlyReading.forEach(function(b){freshById[b.id]=b;});
+  // Update local completed books with fresh metadata (author, title, category, totalPages)
+  local.completed=local.completed.map(function(b){
+    var fb=freshById[b.id];
+    if(fb){
+      b.title=fb.title;
+      b.author=fb.author;
+      b.category=fb.category;
+      b.language=fb.language;
+      if(fb.totalPages)b.totalPages=fb.totalPages;
+      // Keep user's rating
+    }
+    return b;
+  });
+  // Update local currentlyReading with fresh metadata (but keep currentPage)
+  local.currentlyReading=local.currentlyReading.map(function(b){
+    var fb=freshById[b.id];
+    if(fb){
+      b.title=fb.title;
+      b.author=fb.author;
+      b.category=fb.category;
+      b.language=fb.language;
+      if(fb.totalPages)b.totalPages=fb.totalPages;
+      // Keep currentPage, startDate
+    }
+    return b;
+  });
+  // Add any new candidates from fresh that don't exist in local
+  var localCandIds={};
+  local.nextCandidates.forEach(function(c){localCandIds[c.id]=true;});
+  fresh.nextCandidates.forEach(function(c){
+    if(!localCandIds[c.id]){
+      // Also check it wasn't already started/completed by user
+      var inCur=local.currentlyReading.some(function(b){return b.id===c.id;});
+      var inDone=local.completed.some(function(b){return b.id===c.id;});
+      if(!inCur&&!inDone) local.nextCandidates.push(c);
+    } else {
+      // Update metadata of existing candidate
+      local.nextCandidates=local.nextCandidates.map(function(lc){
+        if(lc.id===c.id){lc.title=c.title;lc.author=c.author;lc.category=c.category;lc.language=c.language;}
+        return lc;
+      });
+    }
+  });
+  // Add any new completed books from fresh that don't exist locally
+  var localDoneIds={};
+  local.completed.forEach(function(b){localDoneIds[b.id]=true;});
+  fresh.completed.forEach(function(b){
+    if(!localDoneIds[b.id]) local.completed.push(b);
+  });
+  // Keep user's readingLog, notes, ideas, yearGoal
+  return local;
+}
+
+function save(){try{D.categories=CATS;localStorage.setItem(SK,JSON.stringify(D));}catch(e){}}
+
+// Backup: download data as JSON
+function doBackup(){
+  var json=JSON.stringify(D,null,2);
+  var blob=new Blob([json],{type:'application/json'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;
+  a.download='reading-tracker-backup-'+td()+'.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Restore: load JSON file
+function doRestore(){
+  var input=document.createElement('input');
+  input.type='file';
+  input.accept='.json';
+  input.onchange=function(e){
+    var file=e.target.files[0];
+    if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var imported=JSON.parse(ev.target.result);
+        if(imported.currentlyReading&&imported.completed){
+          D=imported;
+          D._v=DATA_VERSION;
+          if(D.categories) CATS=D.categories;
+          save();
+          closeM();render();
+          alert('복원 완료!');
+        }else{
+          alert('올바른 백업 파일이 아닙니다.');
+        }
+      }catch(err){
+        alert('파일 읽기 오류: '+err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+// Reset to fresh defaults
+function doReset(){
+  if(!confirm('모든 데이터를 초기화할까요? 읽기 기록, 메모, 아이디어가 모두 삭제됩니다.'))return;
+  D=JSON.parse(JSON.stringify(DD));
+  D._v=DATA_VERSION;
+  CATS=JSON.parse(JSON.stringify(DEFAULT_CATS));
+  save();closeM();render();
+  alert('초기화 완료');
+}
+
+// Clean start: empty data for new users
+function doClean(){
+  if(!confirm('완전히 빈 상태로 시작합니다. 모든 데이터와 카테고리가 삭제됩니다.'))return;
+  CATS=JSON.parse(JSON.stringify(DEFAULT_CATS));
+  D={currentlyReading:[],completed:[],nextCandidates:[],readingLog:[],yearGoal:24,notes:{},ideas:[],_v:DATA_VERSION};
+  save();closeM();render();
+  alert('빈 상태로 시작합니다.');
+}
+// Category management
+var _selectedColor='#3D7EC7';
+function pickColor(c){
+  _selectedColor=c;
+  var els=document.querySelectorAll('#cat-colors div');
+  els.forEach(function(el){el.style.border=el.getAttribute('data-color')===c?'2px solid var(--ink)':'2px solid transparent';});
+}
+function doAddCat(){
+  var name=gvt('m-cn');var short=gvt('m-cs');var emoji=gvt('m-ce')||'📁';
+  if(!name){alert('이름을 입력하세요');return;}
+  if(!short)short=name;
+  var key=name.replace(/[^a-zA-Z가-힣]/g,'').toLowerCase().slice(0,12)||('cat'+uid());
+  // ensure unique key
+  while(CATS[key])key=key+'_';
+  CATS[key]={label:emoji+' '+name,emoji:emoji,short:short,color:_selectedColor};
+  _selectedColor='#3D7EC7';
+  save();openM('catMgr','');render();
+}
+function doEditCatSave(key){
+  var name=gvt('m-cn');var short=gvt('m-cs');var emoji=gvt('m-ce')||CATS[key].emoji;
+  if(!name){alert('이름을 입력하세요');return;}
+  if(!short)short=name;
+  CATS[key].label=emoji+' '+name;
+  CATS[key].short=short;
+  CATS[key].emoji=emoji;
+  CATS[key].color=_selectedColor;
+  _selectedColor='#3D7EC7';
+  save();openM('catMgr','');render();
+}
+function doDelCat(key,count){
+  if(count>0){alert('이 카테고리에 '+count+'권의 책이 있어서 삭제할 수 없습니다. 먼저 책들의 카테고리를 변경해 주세요.');return;}
+  if(!confirm(CATS[key].short+' 카테고리를 삭제할까요?'))return;
+  delete CATS[key];
+  save();openM('catMgr','');render();
+}
 function uid(){return Math.random().toString(36).slice(2,9);}
 function td(){return new Date().toISOString().split('T')[0];}
 function fd(d){if(!d)return'';const t=new Date(d);return`${t.getFullYear()}.${String(t.getMonth()+1).padStart(2,'0')}.${String(t.getDate()).padStart(2,'0')}`;}
@@ -248,7 +435,7 @@ function render(){
 
   const cc={};Object.keys(CATS).forEach(k=>{cc[k]=comp.filter(b=>b.category===k).length;});
 
-  let h=`<div class="header"><div class="header-top"><div><h1>📖 Reading Tracker</h1><div class="sub">2022~ · Dr. Lee Keon-Joo · ${fd(td())}</div></div><div class="hdr-btns"><button onclick="openM('addBook')">+ 새 책</button><button onclick="showPrint()">📋 출력</button></div></div>`;
+  let h=`<div class="header"><div class="header-top"><div><h1>📖 Reading Tracker</h1><div class="sub">2022~ · Dr. Lee Keon-Joo · ${fd(td())}</div></div><div class="hdr-btns"><button onclick="openM('addBook')">+ 새 책</button><button onclick="showPrint()">📋 출력</button><button onclick="openM('settings')">⚙️</button></div></div>`;
   h+=`<div class="quote"><p>${esc(quote)}</p></div>`;
   h+=`<div class="sgrid">`;
   [{l:'읽는 중',v:cr.length,u:'권',c:'#3D7EC7'},{l:'2026 완독',v:c26.length,u:'/'+D.yearGoal,c:'#2E8B57'},{l:'전체 완독',v:tot,u:'권',c:'#C27028'}].forEach(s=>{h+=`<div class="sc"><div class="sl">${s.l}</div><div class="sv" style="color:${s.c}">${s.v}<span class="su">${s.u}</span></div></div>`;});
@@ -473,6 +660,67 @@ function openM(type,id){
     h+=`<label class="fd"><span class="fl2">태그 (콤마 구분)</span><input class="fi" id="m-itag" value="${(idea.tags||[]).join(', ')}"></label>`;
     h+=`<div class="br"><button class="btn bp2 bs" onclick="doEditIdea('${idea.id}')">저장</button></div>`;
     setTimeout(()=>{if(document.getElementById('m-ibk'))document.getElementById('m-ibk').value=idea.bookId||'';},50);
+  }
+  else if(type==='settings'){
+    h=`<div class="mt">⚙️ 설정</div>`;
+    h+=`<div style="display:flex;flex-direction:column;gap:10px">`;
+    h+=`<button class="btn bo" style="width:100%;text-align:left;padding:12px 16px" onclick="closeM();setTimeout(function(){openM('catMgr','')},100)">🏷 카테고리 관리</button>`;
+    h+=`<button class="btn bo" style="width:100%;text-align:left;padding:12px 16px" onclick="doBackup();closeM()">📥 데이터 백업 (JSON 다운로드)</button>`;
+    h+=`<button class="btn bo" style="width:100%;text-align:left;padding:12px 16px" onclick="doRestore()">📤 데이터 복원 (JSON 업로드)</button>`;
+    h+=`<div style="border-top:1px solid var(--border);margin:6px 0"></div>`;
+    h+=`<button class="btn bd2" style="width:100%;text-align:left;padding:12px 16px" onclick="doReset()">🔄 기본 데이터로 초기화</button>`;
+    h+=`<button class="btn bd2" style="width:100%;text-align:left;padding:12px 16px" onclick="doClean()">🧹 빈 상태로 시작</button>`;
+    h+=`</div>`;
+    h+=`<div style="margin-top:16px;font-size:11px;color:var(--muted);line-height:1.6">`;
+    h+=`<p>🏷 <b>카테고리</b>: 분야를 추가·수정·삭제합니다.</p>`;
+    h+=`<p style="margin-top:6px">📥 <b>백업</b>: 현재 모든 데이터를 JSON 파일로 저장합니다.</p>`;
+    h+=`<p style="margin-top:6px">📤 <b>복원</b>: 백업한 JSON 파일을 불러옵니다.</p>`;
+    h+=`<p style="margin-top:6px">🔄 <b>초기화</b>: HTML에 내장된 기본 데이터로 되돌립니다.</p>`;
+    h+=`<p style="margin-top:6px">🧹 <b>빈 상태</b>: 완전히 빈 트래커로 시작합니다.</p>`;
+    h+=`<p style="margin-top:8px;font-family:var(--mono)">데이터 버전: v${DATA_VERSION}</p>`;
+    h+=`</div>`;
+  }
+  else if(type==='catMgr'){
+    h=`<div class="mt">🏷 카테고리 관리</div>`;
+    var keys=Object.keys(CATS);
+    keys.forEach(function(k){
+      var c=CATS[k];
+      var count=(D.currentlyReading.filter(function(b){return b.category===k}).length)+(D.completed.filter(function(b){return b.category===k}).length)+(D.nextCandidates.filter(function(b){return b.category===k}).length);
+      h+=`<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--border)">`;
+      h+=`<div style="width:12px;height:12px;border-radius:3px;background:${c.color};flex-shrink:0"></div>`;
+      h+=`<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;color:var(--ink)">${esc(c.emoji)} ${esc(c.short)}</div><div style="font-size:10px;color:var(--muted)">${count}권 사용 중</div></div>`;
+      h+=`<button style="font-size:11px;color:var(--ink2);padding:4px 8px;border:1px solid var(--border);border-radius:5px" onclick="openM('editCat','${k}')">수정</button>`;
+      h+=`<button style="font-size:11px;color:#c75050;padding:4px 6px" onclick="doDelCat('${k}',${count})">${count>0?'':'✕'}</button>`;
+      h+=`</div>`;
+    });
+    h+=`<div style="margin-top:14px"><button class="btn bp2 bs" onclick="openM('addCat','')">+ 새 카테고리</button></div>`;
+  }
+  else if(type==='addCat'){
+    h=`<div class="mt">🏷 새 카테고리</div>`;
+    h+=`<label class="fd"><span class="fl2">이름</span><input class="fi" id="m-cn" placeholder="예: 경제 / 경영"></label>`;
+    h+=`<label class="fd"><span class="fl2">짧은 이름</span><input class="fi" id="m-cs" placeholder="예: 경제·경영"></label>`;
+    h+=`<label class="fd"><span class="fl2">이모지</span><input class="fi" id="m-ce" placeholder="예: 💰" maxlength="4"></label>`;
+    h+=`<div class="fd"><span class="fl2">색상</span><div id="cat-colors" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">`;
+    ['#3D7EC7','#2E8B57','#C27028','#8B5E3C','#B5485F','#7B68EE','#20B2AA','#CD853F','#708090','#D4A017','#8B0000','#4682B4'].forEach(function(c){
+      h+=`<div onclick="pickColor('${c}')" style="width:28px;height:28px;border-radius:6px;background:${c};cursor:pointer;border:2px solid transparent" data-color="${c}"></div>`;
+    });
+    h+=`</div></div>`;
+    h+=`<div class="br"><button class="btn bo bs" onclick="openM('catMgr','')">취소</button><button class="btn bp2 bs" onclick="doAddCat()">추가</button></div>`;
+  }
+  else if(type==='editCat'){
+    var ck=CATS[id];
+    if(!ck){closeM();return;}
+    h=`<div class="mt">🏷 카테고리 수정</div>`;
+    h+=`<label class="fd"><span class="fl2">이름</span><input class="fi" id="m-cn" value="${esc(ck.label.replace(ck.emoji+' ',''))}"></label>`;
+    h+=`<label class="fd"><span class="fl2">짧은 이름</span><input class="fi" id="m-cs" value="${esc(ck.short)}"></label>`;
+    h+=`<label class="fd"><span class="fl2">이모지</span><input class="fi" id="m-ce" value="${esc(ck.emoji)}" maxlength="4"></label>`;
+    h+=`<div class="fd"><span class="fl2">색상</span><div id="cat-colors" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">`;
+    ['#3D7EC7','#2E8B57','#C27028','#8B5E3C','#B5485F','#7B68EE','#20B2AA','#CD853F','#708090','#D4A017','#8B0000','#4682B4'].forEach(function(c){
+      h+=`<div onclick="pickColor('${c}')" style="width:28px;height:28px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c===ck.color?'var(--ink)':'transparent'}" data-color="${c}"></div>`;
+    });
+    h+=`</div></div>`;
+    h+=`<div class="br"><button class="btn bo bs" onclick="openM('catMgr','')">취소</button><button class="btn bp2 bs" onclick="doEditCatSave('${id}')">저장</button></div>`;
+    _selectedColor=ck.color;
   }
 
   mc.innerHTML=h;
